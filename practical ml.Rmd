@@ -1,0 +1,113 @@
+---
+title: "Practical Machine Learning"
+author: "Pathik Chamaria"
+date: "March 18, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(cache = TRUE)
+library(caret)
+library(doParallel)
+library(randomForest)
+```
+
+## Introduction  
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement ??? a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.  
+
+In this project, we will use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to predict the manner in which they did the exercise.  
+
+
+## Data Preprocessing
+
+### Download the Data
+```{r, cache = T}
+trainUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+trainFile <- "pml-training.csv"
+testFile  <- "pml-testing.csv"
+if (!file.exists(trainFile)) {
+  download.file(trainUrl, destfile = trainFile)
+}
+if (!file.exists(testFile)) {
+  download.file(testUrl, destfile = testFile)
+}
+```  
+### Read the Data
+After downloading the data from the data source, we can read the two csv files into two data frames.  
+```{r, cache = T}
+train <- read.csv("pml-training.csv")
+test <- read.csv("pml-testing.csv")
+dim(train)
+dim(test)
+```
+The training data set contains 19622 observations and 160 variables, while the testing data set contains 20 observations and 160 variables. The "classe" variable in the training set is the outcome to predict. 
+
+### Clean the data
+In this step, we will clean the data and get rid of observations with missing values as well as some meaningless variables.
+First, we convert all columns caontaning numeric data to numeric format. 
+```{r, cache = T, warning=F}
+to_numeric <- function(x) {if (class(x) != "numeric") as.double(as.character(x)) else as.double(x)}
+train[,7:159] <- apply(train[,7:159],2,to_numeric)
+```
+Next, we remove columns that contain  more than 50% missing values.
+```{r, cache = T}
+missing_indices <- unname(apply(apply(train,2,is.na),2,sum) > 0.5*dim(train)[1] )
+train <- train[,!missing_indices]
+```  
+Next, we get rid of some columns that are not accelerometer measurements.
+```{r, cache = T}
+filter = grepl("belt|forearm|arm|dumbbell", names(train))
+filter[60] <- TRUE
+train <- train[,filter]
+```
+Now, the cleaned training data set contains 19622 observations and 53 variables. The "classe" variable is still in the cleaned training set.
+
+
+## Data Modeling
+We fit a predictive model for activity recognition using **Random Forest** algorithm because it automatically selects important variables and is robust to correlated covariates & outliers in general. We will use **10-fold cross validation 3 times repeated** when applying the algorithm.  
+```{r, cache = T, warning=F}
+set.seed(123)
+#length is = (n_repeats*nresampling)+1
+seeds <- vector(mode = "list", length = 31)
+#(3 is the number of tuning parameter)
+for (i in 1:30) seeds[[i]] <- sample.int(n = 1000, 3)
+#for the last model
+seeds[[31]] <- sample.int(1000, 1)
+fitControl <- trainControl(method = "repeatedcv", number = 10, repeats = 3, seed = seeds)
+library(doParallel) #for paralle execution of code. 
+cl <- makeCluster(detectCores())
+```
+
+```{r, cache = T, warning=F}
+registerDoParallel(cl)
+model <- train(classe~.,train,"rf",trControl = fitControl)
+stopCluster(cl)
+```
+The model performs good on train data with more than 99% accuracy
+
+
+```{r}
+confusionMatrix(model$finalModel$predicted,train$classe)$overall[1]
+```
+
+## Predicting for Test Data Set
+Now, we apply the model to the original testing data set downloaded from the data source. 
+```{r, cache = T}
+result <- predict(model, test)
+result
+```  
+
+## Appendix: Figures
+- Feature Plot  
+```{r, cache = T}
+featurePlot(train[,-53], train[,53])
+```
+
+- ROC Curve
+```{r, cache = T}
+plot(model)
+```
+
+
